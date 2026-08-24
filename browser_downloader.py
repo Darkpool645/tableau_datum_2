@@ -1,10 +1,9 @@
 from __future__ import annotations
-import calendar
 import re
 
 from pathlib import Path
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from playwright.sync_api import sync_playwright
 from playwright.sync_api import TimeoutError as PWTimeout
 
@@ -19,7 +18,7 @@ REPORT_PATH = "/venta_reporte_productos.php"
 DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000
 
 @dataclass
-class DownloadedMonth:
+class DownloadedDay:
     start: date
     end: date
     file: Path
@@ -27,26 +26,22 @@ class DownloadedMonth:
 
     @property
     def tag(self) -> str:
-        return self.start.strftime("%Y-%m")
+        return self.start.strftime("%Y-%m-%d")
 
-def month_chunks(start: date, end: date) -> list[tuple[date, date]]:
-    cursor = date(start.year, start.month, 1)
+def day_chunks(start: date, end: date) -> list[tuple[date, date]]:
+    cursor = start
     sections = []
     while cursor <= end:
-        last = calendar.monthrange(cursor.year, cursor.month)[1]
-        close = date(cursor.year, cursor.month, last)
-        sections.append((max(start, cursor), min(end, close)))
-        cursor = (date(cursor.year + 1, 1, 1) if cursor.month == 12
-                  else date(cursor.year, cursor.month + 1, 1))
+        sections.append((cursor, cursor))
+        cursor += timedelta(days=1)
 
     return sections
 
 def file_name(start: date, end: date) -> str:
-    last_day = calendar.monthrange(start.year, start.month)[1]
-    complete = start.day == 1 and end.day == last_day
-    base = start.strftime("%Y-%m")
-    return (f"reporte_ventas_{base}.xlsx" if complete
-            else f"reporte_ventas_{base}_parcial-{end.day:02d}.xlsx")
+    if start == end:
+        return f"reporte_ventas_{start.strftime('%Y-%m-%d')}.xlsx"
+    return (f"reporte_ventas_{start.strftime('%Y-%m-%d')}"
+            f"_a_{end.strftime('%Y-%m-%d')}.xlsx")
 
 class DatumBrowser:
 
@@ -198,7 +193,7 @@ class DatumBrowser:
         if n:
             print(f"        {n} checkbox(es) estaban apagados, los encendí")
         try:
-            self.page.select_option('select[name="frReporte"]', "detallado")
+            self.page.select_option('select[name="frReporte"]', "Totales")
         except Exception:
             pass
 
@@ -218,7 +213,7 @@ class DatumBrowser:
                 )
         return destiny
 
-    def download_month(self, start: date, end:date, destiny: Path) -> Path:
+    def download_day(self, start: date, end:date, destiny: Path) -> Path:
         self.go_to_sales_report()
         self.read_areas()
         self.select_areas()
@@ -236,14 +231,14 @@ class DatumBrowser:
 def range_download(start:date, end: date, mode: str = MODE_URL,
                    headless: bool = False, download_dir: Path = DOWNLOAD_DIR,
                    retries: int = 3, rewrite: bool = False,
-                   slow_mo: int = 0) -> list[DownloadedMonth]:
+                   slow_mo: int = 0) -> list[DownloadedDay]:
 
     download_dir = Path(download_dir)
     download_dir.mkdir(parents=True, exist_ok=True)
-    sections = month_chunks(start, end)
-    print(f"{len(sections)} mes(es) a descargar: {start} -> {end} (modo {mode})")
+    sections = day_chunks(start, end)
+    print(f"{len(sections)} día(s) a descargar: {start} -> {end} (modo {mode})")
 
-    results: list[DownloadedMonth] = []
+    results: list[DownloadedDay] = []
     with DatumBrowser(headless=headless, download_dir=download_dir,
                       slow_mo=slow_mo) as nav:
         nav.login()
@@ -251,24 +246,24 @@ def range_download(start:date, end: date, mode: str = MODE_URL,
         nav.go_to_sales_report()
         nav.read_areas()
 
-        for m_ini, m_end in sections:
-            destiny = download_dir / file_name(m_ini, m_end)
-            tag = m_ini.strftime("%Y-%m")
+        for d_ini, d_end in sections:
+            destiny = download_dir / file_name(d_ini, d_end)
+            tag = d_ini.strftime("%Y-%m-%d")
 
             if destiny.exists() and not rewrite:
                 print(f"[{tag}] ya está en disco, lo salto")
-                results.append(DownloadedMonth(m_ini, m_end, destiny, True))
+                results.append(DownloadedDay(d_ini, d_end, destiny, True))
                 continue
 
-            print(f"[{tag}] {m_ini} .. {m_end}", flush=True)
+            print(f"[{tag}]", flush=True)
             for atempt in range(1, retries + 1):
                 try:
-                    fn = (nav.download_month if mode == MODE_UI
-                          else nav.download_month_url)
-                    route = fn(m_ini, m_end, destiny)
+                    fn = (nav.download_day if mode == MODE_UI
+                          else nav.download_day_url)
+                    route = fn(d_ini, d_end, destiny)
                     kb = route.stat().st_size / 1024
                     print(f"        -> {route.name} ({kb:,.0f} KB)")
-                    results.append(DownloadedMonth(m_ini, m_end, route, False))
+                    results.append(DownloadedDay(d_ini, d_end, route, False))
                     break
                 except Exception as e:
                     destiny.unlink(missing_ok=True)

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from browser_downloader import (
-    MODE_UI, MODE_URL, DOWNLOAD_DIR, month_chunks, range_download
+    MODE_UI, MODE_URL, DOWNLOAD_DIR, day_chunks, range_download
 )
 from consolidator import consolidate
 
@@ -23,8 +23,8 @@ def main():
                     help="por defecto, ayer")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--exit", type=Path, default=DOWNLOAD_DIR)
-    ap.add_argument("--rewrite", action="store_true", 
-                    help="rebaja meses que ya estén en disco")
+    ap.add_argument("--rewrite", action="store_true",
+                    help="rebaja días que ya estén en disco")
     ap.add_argument("--retries", type=int, default=3)
     ap.add_argument("--slow-mo", type=int, default=0,
                     help="ms de pausa entre acciones, para ver el recorrido")
@@ -39,7 +39,7 @@ def main():
         print(f"Rango vacío: {args.fecha_inicio} > {end}")
         return 1
 
-    coverage = len(month_chunks(args.fecha_inicio, end))
+    coverage = len(day_chunks(args.fecha_inicio, end))
     print(f"Rango: {args.fecha_inicio} -> {end} (ayer) | {coverage} archivos esperados\n")
 
     results = range_download(
@@ -56,10 +56,10 @@ def main():
 
     complete = len(results) == coverage
     if not complete:
-        missing = {m[0].strftime("%Y-%m") for m in month_chunks(args.fecha_inicio, end)}
+        missing = {m[0].strftime("%Y-%m-%d") for m in day_chunks(args.fecha_inicio, end)}
         missing -= {r.tag for r in results}
         print(f"FALTAN {coverage - len(results)}: {', '.join(sorted(missing))}")
-        print("Vuelve a correr el comando: los meses ya bajados se saltan.")
+        print("Vuelve a correr el comando: los días ya bajados se saltan.")
     else:
         print(f"OK: los {coverage} archivos están en {args.exit.resolve()}")
 

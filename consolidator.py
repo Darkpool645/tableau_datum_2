@@ -22,7 +22,7 @@ DATE_COLS = ["Fecha"]
 # La fila 5 repite "Total" (venta y tiempos). Aquí se desambigua.
 DUP_RENAME = {"Total": "Total Tiempo"}
 
-FILE_RE = re.compile(r"reporte_ventas_(\d{4})-(\d{2})(?:_parcial-(\d{2}))?\.xlsx$", re.I)
+FILE_RE = re.compile(r"reporte_ventas_(\d{4})-(\d{2})-(\d{2})\.xlsx$", re.I)
 
 
 # --------------------------------------------------------------------------- #
@@ -30,10 +30,9 @@ FILE_RE = re.compile(r"reporte_ventas_(\d{4})-(\d{2})(?:_parcial-(\d{2}))?\.xlsx
 # --------------------------------------------------------------------------- #
 def pick_files(download_dir: Path) -> list[Path]:
     """
-    Un archivo por mes. Si existe el mes completo y además parciales,
-    gana el completo; entre parciales gana el que cubre más días.
+    Un archivo por día.
     """
-    best: dict[str, tuple[int, Path]] = {}
+    best: dict[str, Path] = {}
     for f in sorted(Path(download_dir).glob("reporte_ventas_*.xlsx")):
         if f.name.startswith("~$"):          # temporales de Excel
             continue
@@ -41,14 +40,12 @@ def pick_files(download_dir: Path) -> list[Path]:
         if not m:
             print(f"    ignoro (nombre inesperado): {f.name}")
             continue
-        tag = f"{m.group(1)}-{m.group(2)}"
-        rank = 99 if m.group(3) is None else int(m.group(3))  # completo = 99
-        if tag not in best or rank > best[tag][0]:
-            best[tag] = (rank, f)
+        tag = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        best[tag] = f
 
-    files = [p for _, p in (best[t] for t in sorted(best))]
+    files = [best[t] for t in sorted(best)]
     for t in sorted(best):
-        print(f"    {t} -> {best[t][1].name}")
+        print(f"    {t} -> {best[t].name}")
     return files
 
 
@@ -88,7 +85,7 @@ def read_report(path: Path) -> pd.DataFrame:
     df = pd.DataFrame(data, columns=header)
     df.insert(0, "archivo_origen", path.name)
     m = FILE_RE.search(path.name)
-    df.insert(1, "periodo", f"{m.group(1)}-{m.group(2)}" if m else "")
+    df.insert(1, "periodo", f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else "")
     return df
 
 
@@ -145,7 +142,9 @@ def write_xlsx(df: pd.DataFrame, out: Path) -> Path:
 
     for col_i, name in enumerate(df.columns, 1):
         letter = get_column_letter(col_i)
-        width = max(10, min(38, int(df[name].astype(str).str.len().head(2000).max() or 10) + 2))
+        raw_max = df[name].astype(str).str.len().head(2000).max()
+        content_w = int(raw_max) if pd.notna(raw_max) else 10  # columna vacía -> ancho mínimo
+        width = max(10, min(38, content_w + 2))
         ws.column_dimensions[letter].width = max(width, len(str(name)) + 2)
 
     date_cols = {df.columns.get_loc(c) for c in DATE_COLS if c in df.columns}
