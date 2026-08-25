@@ -7,6 +7,7 @@ from browser_downloader import (
     MODE_UI, MODE_URL, DOWNLOAD_DIR, day_chunks, range_download
 )
 from consolidator import consolidate
+from sheeter import layout
 
 INICIO_HISTORICO = date(2025, 1, 1)
 
@@ -30,8 +31,12 @@ def main():
                     help="ms de pausa entre acciones, para ver el recorrido")
     ap.add_argument("--no-consolidate", action="store_true",
                     help="solo descargar, sin armar el archivo unificado")
-    ap.add_argument("--consolidate-out", type=Path, default=Path("DATUM.xlsx"),
+    ap.add_argument("--consolidate-out", type=Path, default=Path("DATUM_unificado.xlsx"),
                     help="archivo unificado de salida (.xlsx por defecto)")
+    ap.add_argument("--no-layout", action="store_true",
+                    help="no acomodar el consolidado en hojas")
+    ap.add_argument("--layout-out", type=Path, default=Path("DATUM.xlsx"),
+                    help="libro final por hojas (Hoja1/Casa club/Campo de golf/Gastos)")
     args = ap.parse_args()
 
     end = args.to or (date.today() - timedelta(days=1))
@@ -71,6 +76,16 @@ def main():
         consolidate(args.exit, args.consolidate_out)
     except Exception as e:
         print(f"La consolidación falló: {e}")
+        return 1
+
+    if args.no_layout:
+        return 0 if complete else 1
+
+    print("\nAcomodando en hojas...")
+    try:
+        layout(args.consolidate_out, args.layout_out)
+    except Exception as e:
+        print(f"El acomodo por hojas falló: {e}")
         return 1
     return 0 if complete else 1
 
