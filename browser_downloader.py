@@ -2,48 +2,22 @@ from __future__ import annotations
 import re
 
 from pathlib import Path
-from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from playwright.sync_api import sync_playwright
 from playwright.sync_api import TimeoutError as PWTimeout
 
 from config import DATUM_BASE_URL, DATUM_PASSWORD, DATUM_USER, AREAS_BLACKLIST
+from common import DOWNLOAD_DIR, MODE_UI, DownloadedDay, day_chunks, file_name
 
-DOWNLOAD_DIR = Path("downloads")
-MODE_UI = "ui"
-MODE_URL = "url"
 NAV_TIMEOUT_MS = 90 * 1000
 POS_PATH = "/venta.php"
 REPORT_PATH = "/venta_reporte_productos.php"
 DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000
 
-@dataclass
-class DownloadedDay:
-    start: date
-    end: date
-    file: Path
-    already_exists: bool
-
-    @property
-    def tag(self) -> str:
-        return self.start.strftime("%Y-%m-%d")
-
-def day_chunks(start: date, end: date) -> list[tuple[date, date]]:
-    cursor = start
-    sections = []
-    while cursor <= end:
-        sections.append((cursor, cursor))
-        cursor += timedelta(days=1)
-
-    return sections
-
-def file_name(start: date, end: date) -> str:
-    if start == end:
-        return f"reporte_ventas_{start.strftime('%Y-%m-%d')}.xlsx"
-    return (f"reporte_ventas_{start.strftime('%Y-%m-%d')}"
-            f"_a_{end.strftime('%Y-%m-%d')}.xlsx")
-
 class DatumBrowser:
+    """Descarga los reportes clickeando el sitio de verdad (--mode ui):
+    necesita un Chromium real (headless o no) y por lo tanto un entorno
+    con Playwright/navegador instalado."""
 
     def __init__(self, headless:bool = False, slow_mo: int = 0,
                  download_dir: Path = DOWNLOAD_DIR, channel: str = "chrome"):
@@ -226,17 +200,15 @@ class DatumBrowser:
 
         return self._save(dl.value, destiny)
 
-    
 
-def range_download(start:date, end: date, mode: str = MODE_URL,
-                   headless: bool = False, download_dir: Path = DOWNLOAD_DIR,
-                   retries: int = 3, rewrite: bool = False,
-                   slow_mo: int = 0) -> list[DownloadedDay]:
+def range_download(start:date, end: date, headless: bool = False,
+                   download_dir: Path = DOWNLOAD_DIR, retries: int = 3,
+                   rewrite: bool = False, slow_mo: int = 0) -> list[DownloadedDay]:
 
     download_dir = Path(download_dir)
     download_dir.mkdir(parents=True, exist_ok=True)
     sections = day_chunks(start, end)
-    print(f"{len(sections)} día(s) a descargar: {start} -> {end} (modo {mode})")
+    print(f"{len(sections)} día(s) a descargar: {start} -> {end} (modo {MODE_UI})")
 
     results: list[DownloadedDay] = []
     with DatumBrowser(headless=headless, download_dir=download_dir,
@@ -258,9 +230,7 @@ def range_download(start:date, end: date, mode: str = MODE_URL,
             print(f"[{tag}]", flush=True)
             for atempt in range(1, retries + 1):
                 try:
-                    fn = (nav.download_day if mode == MODE_UI
-                          else nav.download_day_url)
-                    route = fn(d_ini, d_end, destiny)
+                    route = nav.download_day(d_ini, d_end, destiny)
                     kb = route.stat().st_size / 1024
                     print(f"        -> {route.name} ({kb:,.0f} KB)")
                     results.append(DownloadedDay(d_ini, d_end, route, False))
@@ -275,4 +245,4 @@ def range_download(start:date, end: date, mode: str = MODE_URL,
                         nav.login()
                         nav.go_to_pos()
                         nav.go_to_sales_report()
-    return results 
+    return results

@@ -2,3 +2,4 @@ playwright
 dotenv
 pandas
 openpyxl
+requests
