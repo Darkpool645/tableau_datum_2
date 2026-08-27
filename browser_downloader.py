@@ -156,10 +156,20 @@ class DatumBrowser:
     def select_all(self):
         n = self.page.evaluate("""
         () => {
-            const pat = /^(frTipo\\d|frStatus\\d|frTipoProducto\\d+|frDia\\d|frHora\\d+|frProducto(Vendido|Cancelado))$/;
+            const patOn = /^(frTipo\\d|frTipoProducto\\d+|frDia\\d|frHora\\d+)$/;
+            const patStatus = /^frStatus\\d+$/;
             let n = 0;
             document.querySelectorAll('input[type=checkbox]').forEach(c => {
-                if (pat.test(c.name) && !c.checked) { c.click(); n++; }
+                if (patOn.test(c.name)) {
+                    if (!c.checked) { c.click(); n++; }
+                } else if (patStatus.test(c.name)) {
+                    const shouldBeChecked = c.name !== 'frStatus2';
+                    if (c.checked !== shouldBeChecked) { c.click(); n++; }
+                } else if (c.name === 'frProductoCancelado') {
+                    if (c.checked) { c.click(); n++; }
+                } else if (c.name === 'frProductoVendido') {
+                    if (!c.checked) { c.click(); n++; }
+                }
             });
             return n;
         }

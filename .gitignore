@@ -4,3 +4,4 @@ __pycache__/
 .claude/
 downloads/
 *.xlsx
+out/
