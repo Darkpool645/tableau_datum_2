@@ -4,6 +4,9 @@
 Entrada : el DataFrame (o el .xlsx/.csv/.parquet) que produce consolidator.py
 Salida  : un libro con 4 hojas
             Hoja1          -> Alimentos y Bebidas (+ Tipo Conjunto / Tipo / Subtipo)
+                              "Callos Cortes" NO es un area de negocio aparte:
+                              son filas de A y B a las que se les unifica la
+                              columna Area a "Callos de cortes"
             Casa club      -> Area de negocio = Casa club      (+ Union)
             Campo de golf  -> Area de negocio = Campo de golf  (+ Union)
             Gastos         -> captura manual, se conserva del libro anterior
@@ -45,6 +48,14 @@ AREA_OVERRIDE = {
 # Proshop vende de los dos lados: se decide por el grupo de primer nivel
 PROSHOP = "Proshop"
 GRUPO_CAMPO_PREFIX = "CAMPO DE GOLF"
+# Callos Cortes se cobra desde varios puntos de A y B (Callos de cortes,
+# Mulligan, Sushi, Vista del Lago...). Sigue siendo Alimentos y Bebidas: no
+# cambia el Area de negocio, solo se le unifica la columna Area a "Callos de
+# cortes" para poder filtrarlo. Se reconoce por el Tipo ("Callos ...") o por
+# el producto de descuento.
+AREA_CALLOS = "Callos de cortes"
+TIPO_CALLOS = "callos"
+PRODUCTOS_CALLOS = {"Descuento CS", "Descuento Callos"}
 
 # Basura que Datum mete cuando un día no trae movimientos
 AREAS_BASURA = {"", "no existen registros para mostrar."}
@@ -141,14 +152,21 @@ def derive_subtipo(tipo_conjunto: pd.Series) -> pd.Series:
     return tipo_conjunto.map(lambda v: _match(v, SUBTIPO_RULES, SUBTIPO_DEFAULT))
 
 
+def es_callos(tipo: pd.Series, producto: pd.Series) -> pd.Series:
+    """Filas que pertenecen a Callos Cortes: Tipo con 'Callos' o descuento suyo."""
+    t = tipo.map(lambda v: "" if pd.isna(v) else str(v).lower())
+    p = producto.map(lambda v: "" if pd.isna(v) else str(v).strip())
+    return t.str.contains(TIPO_CALLOS, regex=False) | p.isin(PRODUCTOS_CALLOS)
+
+
 def derive_area_negocio(area: pd.Series, grupo: pd.Series) -> pd.Series:
     def resolver(a, g):
         a = (a or "").strip()
         if a in AREA_OVERRIDE:
             return AREA_OVERRIDE[a]
         if a == PROSHOP:
-            g = (g or "").strip().upper()
-            return CAMPO_GOLF if g.startswith(GRUPO_CAMPO_PREFIX) else CASA_CLUB
+            gu = (g or "").strip().upper()
+            return CAMPO_GOLF if gu.startswith(GRUPO_CAMPO_PREFIX) else CASA_CLUB
         return AYB
 
     return pd.Series([resolver(a, g) for a, g in zip(area, grupo)], index=area.index)
@@ -174,6 +192,8 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
     # 3. columnas derivadas
     df["Usuario"] = df["Usuario"].fillna("").astype(str).str.strip().str.upper()
+    # Callos Cortes: sigue siendo A y B, solo se le unifica la columna Area
+    df.loc[es_callos(df["Tipo"], df["Producto"]), "Area"] = AREA_CALLOS
     df["Area de negocio"] = derive_area_negocio(df["Area"], df["Grupo"])
     df["Tipo Conjunto"] = df["Tipo"]
     df["Union"] = 1
@@ -183,7 +203,8 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
     hojas: dict[str, pd.DataFrame] = {}
 
-    # --- Hoja1: Alimentos y Bebidas ---
+    # --- Hoja1: Alimentos y Bebidas (incluye Callos Cortes, ya con Area
+    #     unificada a "Callos de cortes") ---
     ayb = df[df["Area de negocio"] == AYB].copy()
     ayb["Tipo"] = derive_tipo(ayb["Tipo Conjunto"])
     ayb["Subtipo"] = derive_subtipo(ayb["Tipo Conjunto"])
@@ -191,8 +212,8 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     hojas[HOJA_AYB] = ayb[COLS_AYB]
 
     # --- Casa club / Campo de golf: conservan el Tipo original ---
-    for hoja, negocio in ((CASA_CLUB, CASA_CLUB), (CAMPO_GOLF, CAMPO_GOLF)):
-        hojas[hoja] = df[df["Area de negocio"] == negocio][COLS_NEGOCIO].copy()
+    for hoja in (CASA_CLUB, CAMPO_GOLF):
+        hojas[hoja] = df[df["Area de negocio"] == hoja][COLS_NEGOCIO].copy()
 
     for nombre, hoja in hojas.items():
         print(f"    {nombre}: {len(hoja):,} filas")
