@@ -17,8 +17,10 @@ Notas de diseño
   calculan en Python con exactamente la misma lógica: openpyxl escribe fórmulas
   SIN valor en caché, y Tableau lee la caché, así que una fórmula recién escrita
   llegaría como NULL. El valor calculado es idéntico al que Excel cachea.
-* Fecha se escribe como datetime real (no texto) y los % como número con formato
-  de porcentaje, para que Tableau los tipe solo.
+* Fecha se recalcula a partir de la columna "periodo" del consolidado (el día
+  del reporte de Datum, no el timestamp original de la venta) y se escribe
+  como fecha real (no texto). Los % se escriben como número con formato de
+  porcentaje. Así Tableau los tipa solo.
 """
 
 from __future__ import annotations
@@ -107,7 +109,7 @@ FMT = {
     "Margen": "#,##0.00",
     "% Utilidad": "0%",
     "% Margen": "0%",
-    "Fecha": "yyyy-mm-dd hh:mm:ss",
+    "Fecha": "yyyy-mm-dd",
 }
 FUENTE = "Arial"
 
@@ -190,6 +192,15 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     col_grupos = "Grupos" if "Grupos" in df.columns else "Grupo"
     df[["Grupo", "Subgrupo", "Sub subgrupo"]] = split_grupos(df[col_grupos])
 
+    # 2.5 Fecha se toma de "periodo" (el día del reporte de Datum), no del
+    #     timestamp original de la venta: Datum a veces marca una venta con
+    #     hora de después de medianoche pero el reporte -y el corte de caja-
+    #     al que pertenece es el que indica "periodo". El resultado es solo
+    #     la fecha (sin hora).
+    col_periodo = next((c for c in df.columns if c.lower() == "periodo"), None)
+    fuente_fecha = col_periodo if col_periodo else "Fecha"
+    df["Fecha"] = pd.to_datetime(df[fuente_fecha], errors="coerce").dt.date
+
     # 3. columnas derivadas
     df["Usuario"] = df["Usuario"].fillna("").astype(str).str.strip().str.upper()
     # Callos Cortes: sigue siendo A y B, solo se le unifica la columna Area
@@ -271,7 +282,7 @@ def _escribe_hoja(wb: Workbook, nombre: str, df: pd.DataFrame) -> None:
     for fila in df.itertuples(index=False, name=None):
         celdas = []
         for valor, fmt in zip(fila, formatos):
-            if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+            if valor is None or valor is pd.NaT or (isinstance(valor, float) and pd.isna(valor)):
                 celdas.append(None)
                 continue
             if isinstance(valor, pd.Timestamp):
