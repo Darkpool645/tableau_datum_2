@@ -6,7 +6,11 @@ Salida  : un libro con 4 hojas
             Hoja1          -> Alimentos y Bebidas (+ Tipo Conjunto / Tipo / Subtipo)
                               "Callos Cortes" NO es un area de negocio aparte:
                               son filas de A y B a las que se les unifica la
-                              columna Area a "Callos de cortes"
+                              columna Area a "Callos de cortes". Los
+                              descuentos de Mulligan/Sushi/Vista del Lago/
+                              Callos cobrados desde otra caja también se
+                              reasignan al punto de venta real (ver
+                              corrige_area / DESCUENTO_AREA)
             Casa club      -> Area de negocio = Casa club      (+ Union)
             Campo de golf  -> Area de negocio = Campo de golf  (+ Union)
             Gastos         -> captura manual, se conserva del libro anterior
@@ -53,11 +57,26 @@ GRUPO_CAMPO_PREFIX = "CAMPO DE GOLF"
 # Callos Cortes se cobra desde varios puntos de A y B (Callos de cortes,
 # Mulligan, Sushi, Vista del Lago...). Sigue siendo Alimentos y Bebidas: no
 # cambia el Area de negocio, solo se le unifica la columna Area a "Callos de
-# cortes" para poder filtrarlo. Se reconoce por el Tipo ("Callos ...") o por
-# el producto de descuento.
+# cortes" para poder filtrarlo. Se reconoce por el Tipo ("Callos ...").
 AREA_CALLOS = "Callos de cortes"
 TIPO_CALLOS = "callos"
-PRODUCTOS_CALLOS = {"Descuento CS", "Descuento Callos"}
+
+# Los DESCUENTOS de Mulligan/Sushi/Vista del Lago/Callos casi siempre se
+# cobran desde la caja de OTRO punto de venta (ej. un descuento de Mulligan
+# cobrado en la caja de Sushi): "Area" queda con la caja que lo cobró, no con
+# el punto de venta al que en realidad pertenece. Datum sí deja claro a quién
+# pertenece en "Producto" -nombre completo o abreviatura-, así que se usa
+# ese valor (y no "Area") para reasignar el punto de venta real.
+DESCUENTO_AREA = {
+    "Descuento Mulligan": "Mulligan",
+    "Descuento MN": "Mulligan",
+    "Descuento Sushi": "Sushi",
+    "Descuento SU": "Sushi",
+    "Descuento Vista lago": "Restaurante Vista del Lago",
+    "Descuento VL": "Restaurante Vista del Lago",
+    "Descuento Callos": AREA_CALLOS,
+    "Descuento CS": AREA_CALLOS,
+}
 
 # Basura que Datum mete cuando un día no trae movimientos
 AREAS_BASURA = {"", "no existen registros para mostrar."}
@@ -154,11 +173,23 @@ def derive_subtipo(tipo_conjunto: pd.Series) -> pd.Series:
     return tipo_conjunto.map(lambda v: _match(v, SUBTIPO_RULES, SUBTIPO_DEFAULT))
 
 
-def es_callos(tipo: pd.Series, producto: pd.Series) -> pd.Series:
-    """Filas que pertenecen a Callos Cortes: Tipo con 'Callos' o descuento suyo."""
+def corrige_area(area: pd.Series, tipo: pd.Series, producto: pd.Series) -> pd.Series:
+    """
+    "Area" trae la caja donde Datum registró la venta, que no siempre es el
+    punto de venta real:
+    - platillos del menú de Callos Cortes (Tipo contiene "callos"), vendidos
+      desde cualquier caja de A y B -> Area de negocio "Callos de cortes".
+    - descuentos de Mulligan/Sushi/Vista del Lago/Callos cobrados desde la
+      caja de otro punto de venta -> Area = el punto de venta que indica
+      "Producto" (DESCUENTO_AREA), no la caja donde se punchó.
+    """
     t = tipo.map(lambda v: "" if pd.isna(v) else str(v).lower())
+    es_callos = t.str.contains(TIPO_CALLOS, regex=False)
+    area = area.mask(es_callos, AREA_CALLOS)
+
     p = producto.map(lambda v: "" if pd.isna(v) else str(v).strip())
-    return t.str.contains(TIPO_CALLOS, regex=False) | p.isin(PRODUCTOS_CALLOS)
+    remap = p.map(DESCUENTO_AREA)
+    return area.mask(remap.notna(), remap)
 
 
 def derive_area_negocio(area: pd.Series, grupo: pd.Series) -> pd.Series:
@@ -203,8 +234,8 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
     # 3. columnas derivadas
     df["Usuario"] = df["Usuario"].fillna("").astype(str).str.strip().str.upper()
-    # Callos Cortes: sigue siendo A y B, solo se le unifica la columna Area
-    df.loc[es_callos(df["Tipo"], df["Producto"]), "Area"] = AREA_CALLOS
+    # Area: corrige Callos Cortes y los descuentos cobrados desde otra caja
+    df["Area"] = corrige_area(df["Area"], df["Tipo"], df["Producto"])
     df["Area de negocio"] = derive_area_negocio(df["Area"], df["Grupo"])
     df["Tipo Conjunto"] = df["Tipo"]
     df["Union"] = 1
