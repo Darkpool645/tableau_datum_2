@@ -3,14 +3,20 @@
 
 Entrada : el DataFrame (o el .xlsx/.csv/.parquet) que produce consolidator.py
 Salida  : un libro con 4 hojas
-            Hoja1          -> Alimentos y Bebidas (+ Tipo Conjunto / Tipo / Subtipo)
-                              "Callos Cortes" NO es un area de negocio aparte:
-                              son filas de A y B a las que se les unifica la
-                              columna Area a "Callos de cortes". Los
-                              descuentos de Mulligan/Sushi/Vista del Lago/
-                              Callos cobrados desde otra caja también se
-                              reasignan al punto de venta real (ver
-                              corrige_area / DESCUENTO_AREA)
+            Hoja1          -> Alimentos y Bebidas (+ Tipo Conjunto / Tipo /
+                              Subtipo / PuntoVenta)
+                              "Area" se conserva TAL CUAL viene de Datum (la
+                              caja donde se registró la operación). La
+                              atribución económica -a qué punto de venta
+                              pertenece realmente la venta- vive en la columna
+                              nueva "PuntoVenta" (ver derive_punto_venta):
+                              las ventas normales se clasifican por
+                              "Tipo Conjunto", el Tabaco por "Area", el
+                              Servicio a Domicilio por "Area", y los descuentos
+                              por "Producto". Así Tableau puede sumar por
+                              PuntoVenta sin inflar la caja donde se punchó
+                              (ej. platillos del menú de Callos vendidos desde
+                              Mulligan, o un "Descuento VL" cobrado en Mulligan).
             Casa club      -> Area de negocio = Casa club      (+ Union)
             Campo de golf  -> Area de negocio = Campo de golf  (+ Union)
             Gastos         -> captura manual, se conserva del libro anterior
@@ -54,29 +60,67 @@ AREA_OVERRIDE = {
 # Proshop vende de los dos lados: se decide por el grupo de primer nivel
 PROSHOP = "Proshop"
 GRUPO_CAMPO_PREFIX = "CAMPO DE GOLF"
-# Callos Cortes se cobra desde varios puntos de A y B (Callos de cortes,
-# Mulligan, Sushi, Vista del Lago...). Sigue siendo Alimentos y Bebidas: no
-# cambia el Area de negocio, solo se le unifica la columna Area a "Callos de
-# cortes" para poder filtrarlo. Se reconoce por el Tipo ("Callos ...").
-AREA_CALLOS = "Callos de cortes"
-TIPO_CALLOS = "callos"
 
-# Los DESCUENTOS de Mulligan/Sushi/Vista del Lago/Callos casi siempre se
-# cobran desde la caja de OTRO punto de venta (ej. un descuento de Mulligan
-# cobrado en la caja de Sushi): "Area" queda con la caja que lo cobró, no con
-# el punto de venta al que en realidad pertenece. Datum sí deja claro a quién
-# pertenece en "Producto" -nombre completo o abreviatura-, así que se usa
-# ese valor (y no "Area") para reasignar el punto de venta real.
-DESCUENTO_AREA = {
+# --------------------------------------------------------------------------- #
+# PuntoVenta: a qué punto de venta pertenece ECONÓMICAMENTE la operación
+# --------------------------------------------------------------------------- #
+# "Area" (la caja donde Datum registró la línea) NO siempre es el punto de
+# venta que recibe el dinero: platillos del menú de Callos se venden desde la
+# caja de Mulligan, un "Descuento VL" se cobra desde Mulligan, etc. Si Tableau
+# suma por "Area", esas cajas quedan infladas. "PuntoVenta" resuelve la
+# atribución económica sin tocar "Area" (que se conserva como evidencia de
+# origen). Orden de prioridad -primer criterio que aplica gana-:
+#   1. Descuentos      -> el nombre del Producto identifica el punto de venta.
+#   2. Servicio a Domicilio (por Area) -> siempre Servicio a Domicilio.
+#   3. Tabaco          -> el Tipo no dice el punto; manda "Area".
+#   4. Venta normal    -> manda "Tipo Conjunto" (contiene el punto de venta).
+#   5. No reconocido   -> respaldo: "Area" normalizada.
+# Las siglas de Producto (MN/VL/SU/CS) NO son regla normativa: solo aparecen
+# en ~80-90% de los casos, así que se usan como validación auxiliar, nunca
+# como filtro final.
+
+# Prefijos de "Tipo Conjunto" que nombran el punto de venta (venta normal).
+# "Vista ..." en Tipo Conjunto == "Restaurante Vista del Lago" en Area.
+TIPO_CONJUNTO_A_PV = {
+    "Mulligan": "Mulligan",
+    "Sushi": "Sushi",
+    "Vista": "Vista",
+    "Hoyo 10": "Hoyo 10",
+    "Carrito 1": "Carrito 1",
+    "Carrito 2": "Carrito 2",
+    "Callos": "Callos",
+}
+
+# "Area" -> PuntoVenta. Se usa para Tabaco, Servicio a Domicilio y el respaldo.
+AREA_A_PV = {
+    "Mulligan": "Mulligan",
+    "Sushi": "Sushi",
+    "Restaurante Vista del Lago": "Vista",
+    "Hoyo 10": "Hoyo 10",
+    "Carrito 1": "Carrito 1",
+    "Carrito 2": "Carrito 2",
+    "Callos de cortes": "Callos",
+    "Servicio a Domicilio": "Servicio a Domicilio",
+}
+
+# Descuentos: el "Producto" dice a qué punto de venta pertenece el descuento
+# (se cobra desde la caja de otro punto muy seguido). Nombre completo o sigla.
+PRODUCTO_DESCUENTO_A_PV = {
     "Descuento Mulligan": "Mulligan",
     "Descuento MN": "Mulligan",
     "Descuento Sushi": "Sushi",
     "Descuento SU": "Sushi",
-    "Descuento Vista lago": "Restaurante Vista del Lago",
-    "Descuento VL": "Restaurante Vista del Lago",
-    "Descuento Callos": AREA_CALLOS,
-    "Descuento CS": AREA_CALLOS,
+    "Descuento Vista lago": "Vista",
+    "Descuento VL": "Vista",
+    "Descuento Callos": "Callos",
+    "Descuento CS": "Callos",
+    "Descuento Hoyo 10": "Hoyo 10",
+    "Descuento Carrito 1": "Carrito 1",
+    "Descuento Carrito 2": "Carrito 2",
+    "Descuento Servicio": "Servicio a Domicilio",
 }
+
+AREA_SERVICIO = "Servicio a Domicilio"
 
 # Basura que Datum mete cuando un día no trae movimientos
 AREAS_BASURA = {"", "no existen registros para mostrar."}
@@ -103,7 +147,7 @@ HOJA_AYB = "Hoja1"
 HOJA_GASTOS = "Gastos"
 
 COLS_AYB = [
-    "Area", "Grupo", "Subgrupo", "Sub subgrupo", "Producto",
+    "Area", "PuntoVenta", "Grupo", "Subgrupo", "Sub subgrupo", "Producto",
     "Tipo Conjunto", "Tipo", "Subtipo", "Usuario",
     "Cantidad", "Precio", "Impuesto", "Total", "Costo", "Margen",
     "% Utilidad", "% Margen", "Fecha", "Area de negocio",
@@ -173,23 +217,63 @@ def derive_subtipo(tipo_conjunto: pd.Series) -> pd.Series:
     return tipo_conjunto.map(lambda v: _match(v, SUBTIPO_RULES, SUBTIPO_DEFAULT))
 
 
-def corrige_area(area: pd.Series, tipo: pd.Series, producto: pd.Series) -> pd.Series:
-    """
-    "Area" trae la caja donde Datum registró la venta, que no siempre es el
-    punto de venta real:
-    - platillos del menú de Callos Cortes (Tipo contiene "callos"), vendidos
-      desde cualquier caja de A y B -> Area de negocio "Callos de cortes".
-    - descuentos de Mulligan/Sushi/Vista del Lago/Callos cobrados desde la
-      caja de otro punto de venta -> Area = el punto de venta que indica
-      "Producto" (DESCUENTO_AREA), no la caja donde se punchó.
-    """
-    t = tipo.map(lambda v: "" if pd.isna(v) else str(v).lower())
-    es_callos = t.str.contains(TIPO_CALLOS, regex=False)
-    area = area.mask(es_callos, AREA_CALLOS)
+def _pv_por_tipo_conjunto(tc: str) -> str | None:
+    """Venta normal: el prefijo de "Tipo Conjunto" nombra el punto de venta."""
+    for prefijo, pv in TIPO_CONJUNTO_A_PV.items():
+        if tc.startswith(prefijo):
+            return pv
+    return None
 
-    p = producto.map(lambda v: "" if pd.isna(v) else str(v).strip())
-    remap = p.map(DESCUENTO_AREA)
-    return area.mask(remap.notna(), remap)
+
+def _pv_fila(area: str, tipo_conjunto: str, producto: str) -> str:
+    """
+    Punto de venta al que pertenece ECONÓMICAMENTE una línea. No toca "Area".
+    Orden de prioridad (ver comentario de TIPO_CONJUNTO_A_PV):
+      1. descuento -> Producto ; 2. Servicio a Domicilio -> Area ;
+      3. Tabaco -> Area ; 4. venta normal -> Tipo Conjunto ; 5. respaldo -> Area.
+    """
+    tc = tipo_conjunto.strip()
+    tc_bajo = tc.lower()
+
+    # 1. Descuentos: el Producto dice el punto de venta.
+    if "descuento" in tc_bajo:
+        pv = PRODUCTO_DESCUENTO_A_PV.get(producto.strip())
+        if pv:
+            return pv
+        return AREA_A_PV.get(area, area)
+
+    # 2. Servicio a Domicilio: manda el Area aunque el Tipo Conjunto diga otra cosa.
+    if area == AREA_SERVICIO:
+        return AREA_SERVICIO
+
+    # 3. Tabaco: el Tipo no indica el punto; manda el Area.
+    if tc_bajo == "tabaco":
+        return AREA_A_PV.get(area, area)
+
+    # 4. Venta normal: manda el Tipo Conjunto.
+    pv = _pv_por_tipo_conjunto(tc)
+    if pv:
+        return pv
+
+    # 5. No reconocido: respaldo controlado sobre el Area normalizada.
+    return AREA_A_PV.get(area, area)
+
+
+def derive_punto_venta(area: pd.Series, tipo_conjunto: pd.Series,
+                       producto: pd.Series) -> pd.Series:
+    """
+    Columna "PuntoVenta": a qué punto de venta se atribuye económicamente cada
+    línea. "Area" (la caja donde se punchó) se conserva intacta; esta función
+    NO la modifica y NO borra filas. Es una pura reasignación: el dinero solo
+    se mueve entre puntos de venta, nunca se crea ni se elimina.
+    """
+    a = area.map(lambda v: "" if pd.isna(v) else str(v).strip())
+    tc = tipo_conjunto.map(lambda v: "" if pd.isna(v) else str(v))
+    p = producto.map(lambda v: "" if pd.isna(v) else str(v))
+    return pd.Series(
+        [_pv_fila(ai, tci, pi) for ai, tci, pi in zip(a, tc, p)],
+        index=area.index,
+    )
 
 
 def derive_area_negocio(area: pd.Series, grupo: pd.Series) -> pd.Series:
@@ -234,10 +318,14 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
     # 3. columnas derivadas
     df["Usuario"] = df["Usuario"].fillna("").astype(str).str.strip().str.upper()
-    # Area: corrige Callos Cortes y los descuentos cobrados desde otra caja
-    df["Area"] = corrige_area(df["Area"], df["Tipo"], df["Producto"])
+    # "Area" se deja TAL CUAL vino de Datum (evidencia de origen). El Area de
+    # negocio -en qué hoja cae la fila- se decide sobre ese Area original.
     df["Area de negocio"] = derive_area_negocio(df["Area"], df["Grupo"])
     df["Tipo Conjunto"] = df["Tipo"]
+    # "PuntoVenta": atribución económica real (no toca Area, no borra filas).
+    df["PuntoVenta"] = derive_punto_venta(
+        df["Area"], df["Tipo Conjunto"], df["Producto"]
+    )
     df["Union"] = 1
 
     if "Fecha" in df:
@@ -245,8 +333,8 @@ def build_sheets(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
     hojas: dict[str, pd.DataFrame] = {}
 
-    # --- Hoja1: Alimentos y Bebidas (incluye Callos Cortes, ya con Area
-    #     unificada a "Callos de cortes") ---
+    # --- Hoja1: Alimentos y Bebidas. "Area" = caja de origen (sin tocar);
+    #     "PuntoVenta" = punto de venta al que pertenece el dinero. ---
     ayb = df[df["Area de negocio"] == AYB].copy()
     ayb["Tipo"] = derive_tipo(ayb["Tipo Conjunto"])
     ayb["Subtipo"] = derive_subtipo(ayb["Tipo Conjunto"])
