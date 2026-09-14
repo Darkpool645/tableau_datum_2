@@ -8,8 +8,8 @@ Uso:
 
 Que hace:
   1. Carga la fuente y (por defecto) filtra agosto 2026 por la columna de fecha.
-  2. Calcula el resumen por PuntoVenta de dos formas:
-       A) confiando en la columna 'PuntoVenta' si el archivo ya la trae;
+  2. Calcula el resumen por Punto de Venta de dos formas:
+       A) confiando en la columna 'Punto de Venta' si el archivo ya la trae;
        B) re-derivandola con las reglas de negocio (descuento->Producto,
           Servicio a Domicilio->Area, Tabaco->Area, normal->Tipo Conjunto).
   3. Compara ambas contra los totales validados del reporte detallado y
@@ -32,7 +32,7 @@ OBJETIVO = {
     "Mulligan": 982906.62,
     "Servicio a Domicilio": 11958.59,
     "Sushi": 359647.98,
-    "Vista": 768418.47,
+    "Restaurante Vista del Lago": 768418.47,
     "Total": 2924392.39,
 }
 
@@ -44,18 +44,25 @@ PRODUCTO_DESCUENTO_A_PV = {
     "Descuento Hoyo 10": "Hoyo 10",
     "Descuento MN": "Mulligan",
     "Descuento Mulligan": "Mulligan",
-    "Descuento VL": "Vista",
-    "Descuento VL (Mulligan)": "Vista",
-    "Descuento Vista lago": "Vista",
+    "Descuento VL": "Restaurante Vista del Lago",
+    "Descuento VL (Mulligan)": "Restaurante Vista del Lago",
+    "Descuento Vista lago": "Restaurante Vista del Lago",
     "Descuento CS": "Callos",
     "Descuento Callos": "Callos",
     "Descuento SU": "Sushi",
     "Descuento Sushi": "Sushi",
 }
-TIPO_CONJUNTO_PREFIJOS = ["Mulligan", "Sushi", "Vista", "Hoyo 10",
-                          "Carrito 1", "Carrito 2", "Callos"]
+TIPO_CONJUNTO_PREFIJOS = {
+    "Mulligan": "Mulligan",
+    "Sushi": "Sushi",
+    "Vista": "Restaurante Vista del Lago",
+    "Hoyo 10": "Hoyo 10",
+    "Carrito 1": "Carrito 1",
+    "Carrito 2": "Carrito 2",
+    "Callos": "Callos",
+}
 AREA_A_PV = {
-    "Restaurante Vista del Lago": "Vista",
+    "Restaurante Vista del Lago": "Restaurante Vista del Lago",
     "Callos de cortes": "Callos",
     "Mulligan": "Mulligan",
     "Sushi": "Sushi",
@@ -80,9 +87,9 @@ def clasificar_fila(area: str, tipo_conjunto: str, producto: str) -> str:
         return "Servicio a Domicilio"
     if tc.lower() == "tabaco":
         return AREA_A_PV.get(area, area)
-    for prefijo in TIPO_CONJUNTO_PREFIJOS:
+    for prefijo, pv in TIPO_CONJUNTO_PREFIJOS.items():
         if tc.startswith(prefijo):
-            return prefijo
+            return pv
     return AREA_A_PV.get(area, area)
 
 
@@ -99,9 +106,9 @@ def resumen(df: pd.DataFrame, usar_columna_puntoventa: bool) -> pd.DataFrame:
 
     df = df[df["Area"].ne("") & ~df["Area"].isin(AREAS_EXCLUIDAS)].copy()
 
-    if usar_columna_puntoventa and "PuntoVenta" in df.columns:
-        df["PV"] = _norm(df["PuntoVenta"])
-        modo = "columna PuntoVenta"
+    if usar_columna_puntoventa and "Punto de Venta" in df.columns:
+        df["PV"] = _norm(df["Punto de Venta"])
+        modo = "columna Punto de Venta"
     else:
         df["PV"] = [clasificar_fila(a, t, p)
                     for a, t, p in zip(df["Area"], df[tcol], df["Producto"])]
@@ -114,7 +121,7 @@ def resumen(df: pd.DataFrame, usar_columna_puntoventa: bool) -> pd.DataFrame:
     r = (df.groupby("PV")
            .agg(Ventas=("Ventas", "sum"), Descuento=("Descuento", "sum"),
                 Total=("Precio", "sum"))
-           .round(2).reset_index().rename(columns={"PV": "PuntoVenta"}))
+           .round(2).reset_index().rename(columns={"PV": "Punto de Venta"}))
     r.loc[len(r)] = ["Total", r["Ventas"].sum(), r["Descuento"].sum(),
                      r["Total"].sum()]
     r.attrs["modo"] = modo
@@ -122,23 +129,24 @@ def resumen(df: pd.DataFrame, usar_columna_puntoventa: bool) -> pd.DataFrame:
 
 
 def comparar_con_objetivo(r: pd.DataFrame) -> bool:
-    got = dict(zip(r["PuntoVenta"], r["Total"]))
+    got = dict(zip(r["Punto de Venta"], r["Total"]))
     ok = True
-    print(f"    {'PuntoVenta':22} {'obtenido':>15} {'objetivo':>15}   estado")
-    print(f"    {'-'*22} {'-'*15} {'-'*15}   ------")
+    ancho = max(22, max(len(pv) for pv in set(OBJETIVO) | set(got)))
+    print(f"    {'Punto de Venta':{ancho}} {'obtenido':>15} {'objetivo':>15}   estado")
+    print(f"    {'-'*ancho} {'-'*15} {'-'*15}   ------")
     for pv, exp in OBJETIVO.items():
         g = got.get(pv)
         if g is None:
-            print(f"    {pv:22} {'(ausente)':>15} {exp:>15,.2f}   FALTA")
+            print(f"    {pv:{ancho}} {'(ausente)':>15} {exp:>15,.2f}   FALTA")
             ok = False
             continue
         estado = "OK" if abs(g - exp) < 0.005 else "DIFERENCIA"
         if estado != "OK":
             ok = False
-        print(f"    {pv:22} {g:>15,.2f} {exp:>15,.2f}   {estado}")
+        print(f"    {pv:{ancho}} {g:>15,.2f} {exp:>15,.2f}   {estado}")
     extra = set(got) - set(OBJETIVO)
     for pv in sorted(extra):
-        print(f"    {pv:22} {got[pv]:>15,.2f} {'(no esperado)':>15}   REVISAR")
+        print(f"    {pv:{ancho}} {got[pv]:>15,.2f} {'(no esperado)':>15}   REVISAR")
         ok = False
     return ok
 
@@ -181,12 +189,12 @@ def main() -> int:
     todo_ok = True
     for usar_col in (True, False):
         r = resumen(df, usar_columna_puntoventa=usar_col)
-        print(f"\n=== Resumen por PuntoVenta [{r.attrs['modo']}] ===")
+        print(f"\n=== Resumen por Punto de Venta [{r.attrs['modo']}] ===")
         print(r.to_string(index=False))
         print("\n  Comparacion contra los totales validados de agosto:")
         todo_ok &= comparar_con_objetivo(r)
-        if usar_col and "PuntoVenta" not in df.columns:
-            print("  (el archivo no trae columna PuntoVenta; este bloque = el siguiente)")
+        if usar_col and "Punto de Venta" not in df.columns:
+            print("  (el archivo no trae columna Punto de Venta; este bloque = el siguiente)")
             break
 
     print()
