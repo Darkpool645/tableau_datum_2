@@ -6,7 +6,7 @@ dashboard de **Tableau**.
 
 ```
 Datum (web) --> downloads/*.xlsx --> DATUM_unificado.xlsx --> DATUM.xlsx --> Tableau (.twbx)
-              (1 archivo/día)      (consolidator.py)      (sheeter.py)
+              (1 archivo/día)       (consolidator.py)      (sheeter.py)
 ```
 
 Tres pasos, cada uno con su script y su rol:
